@@ -12,5 +12,11 @@
       "matches": ["https://myactivity.google.com/product/gemini*"],
       "js": ["content.js"]
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://myactivity.google.com/*"]
+    }
   ]
 }
