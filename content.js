@@ -1,6 +1,32 @@
-// content.js - v1.2
+// content.js - v1.4
 (function () {
-    console.log("Gemini Analyzer v1.2 loaded.");
+    // --- 配置常量区 (集中管理选择器) ---
+    const SELECTORS = {
+        // 滚动到底部时出现的标志元素
+        endSign: 'div[jsname="jOfkMb"]',
+        // 包含所有历史记录条目的主容器
+        listContainer: 'div[jsname="i6CNtf"]',
+        // 日期标题 (例如 "Today", "Yesterday")
+        dateHeader: 'h2.rp10kf',
+        // 具体的提问文本容器
+        promptText: 'div[jsname="r4nke"]',
+        // 时间戳元素 (例如 "10:30 AM")
+        timestamp: '.H3Q9vf.XTnvW',
+        // 单条记录的容器标签 (通常是 c-wiz)
+        itemTag: 'c-wiz'
+    };
+
+    // 获取版本号 (优先从 manifest 读取)
+    const getVersion = () => {
+        try {
+            return chrome.runtime.getManifest().version;
+        } catch (e) {
+            return "0.0.0"; // Fallback if tested outside extension context
+        }
+    };
+
+    const APP_VERSION = getVersion();
+    console.log(`Gemini Analyzer v${APP_VERSION} loaded.`);
 
     class AppUI {
         constructor() {
@@ -9,21 +35,18 @@
                 isDarkMode: false,
                 data: [],
                 dateRange: { start: null, end: null },
-                charts: {} // 存储生成的 Canvas 引用
+                charts: {}
             };
             
-            // 3. 自动检测系统主题
             this.detectSystemTheme();
-            
             this.initControlPanel();
             this.applyTheme();
 
-            // 监听系统主题变化
             window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
                 this.state.isDarkMode = e.matches;
                 this.applyTheme();
                 if (document.getElementById('gemini-analysis-panel')) {
-                    this.generateReport(this.state.data); // 重新生成以适配颜色
+                    this.generateReport(this.state.data);
                 }
             });
         }
@@ -34,7 +57,6 @@
             }
         }
 
-        // --- 1. 初始化控制面板 ---
         initControlPanel() {
             const panel = document.createElement('div');
             panel.id = 'gemini-control-panel';
@@ -46,11 +68,15 @@
                 transition: 'all 0.3s ease', fontSize: '14px'
             });
 
-            // 4. 移除 Emoji (保留主题切换图标)
+            const githubIcon = `<svg viewBox="0 0 16 16" width="20" height="20" style="display:block;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>`;
+
             panel.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                     <h3 style="margin:0; font-size:16px;">Gemini 数据分析</h3>
-                    <button id="btn-theme" style="background:none; border:none; cursor:pointer; font-size:18px;" title="切换模式">🌓</button>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <a href="https://github.com/788009/gemini-usage-analyzer" target="_blank" id="btn-github" style="text-decoration:none; opacity:0.7; transition:opacity 0.2s;" title="访问 GitHub 仓库">${githubIcon}</a>
+                        <button id="btn-theme" style="background:none; border:none; cursor:pointer; font-size:18px; padding:0;" title="切换模式">🌓</button>
+                    </div>
                 </div>
                 
                 <div style="margin-bottom: 10px;">
@@ -69,7 +95,7 @@
 
                 <div id="img-download-area" style="display:none; border-top:1px solid #ddd; padding-top:10px; margin-top:10px;">
                     <div style="font-size:12px; font-weight:bold; margin-bottom:5px;">导出图片选项:</div>
-                    <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="box" checked> 发送量箱线图</label>
+                    <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="box" checked> 每日发送量箱线图</label>
                     <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="day" checked> 每日趋势图</label>
                     <label style="display:block; margin-bottom:8px; font-size:12px;"><input type="checkbox" value="line" checked> 24小时分布图</label>
                     <button id="btn-img-merge" style="width:100%; padding:8px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; background:#fbbc04; color:#202124;">下载合并图片</button>
@@ -84,8 +110,9 @@
                 panel: panel,
                 title: panel.querySelector('h3'),
                 labels: panel.querySelectorAll('label'),
-                inputs: panel.querySelectorAll('input'), // 0: start, 1: end
+                inputs: panel.querySelectorAll('input'),
                 themeBtn: panel.querySelector('#btn-theme'),
+                githubBtn: panel.querySelector('#btn-github'),
                 startBtn: panel.querySelector('#btn-start'),
                 jsonBtn: panel.querySelector('#btn-json'),
                 imgArea: panel.querySelector('#img-download-area'),
@@ -93,7 +120,6 @@
                 status: panel.querySelector('#status-msg')
             };
 
-            // 1. 默认设置：开始日期为空，结束日期为今天
             const today = new Date();
             this.ui.inputs[1].value = today.toISOString().split('T')[0];
 
@@ -116,6 +142,7 @@
             const colors = {
                 bg: dark ? '#202124' : '#ffffff',
                 text: dark ? '#e8eaed' : '#202124',
+                subText: dark ? '#9aa0a6' : '#5f6368',
                 border: dark ? '#5f6368' : '#ddd',
                 btnPrimary: '#1a73e8',
                 btnText: '#ffffff',
@@ -130,7 +157,7 @@
             p.style.color = colors.text;
             
             this.ui.title.style.color = colors.btnPrimary;
-            this.ui.labels.forEach(l => l.style.color = dark ? '#9aa0a6' : '#5f6368');
+            this.ui.labels.forEach(l => l.style.color = colors.subText);
             this.ui.inputs.forEach(i => {
                 i.style.background = colors.inputBg;
                 i.style.color = colors.inputText;
@@ -143,6 +170,9 @@
             
             this.ui.imgArea.style.borderTopColor = colors.areaBorder;
             this.ui.themeBtn.textContent = dark ? '🌞' : '🌓';
+            
+            const svgPath = this.ui.githubBtn.querySelector('path');
+            if (svgPath) svgPath.style.fill = colors.text;
         }
 
         updateStatus(text, color) {
@@ -150,7 +180,6 @@
             this.ui.status.style.color = color || (this.state.isDarkMode ? '#9aa0a6' : '#666');
         }
 
-        // --- 滚动逻辑 ---
         startProcess() {
             if (this.state.isScrolling) return;
 
@@ -160,7 +189,6 @@
             this.state.dateRange.start = startVal ? new Date(startVal) : null;
             this.state.dateRange.end = endVal ? new Date(endVal) : null;
             
-            // 1. 如果 startVal 为空，目标设为极小值，确保滚动到底
             const targetDateRaw = startVal ? startVal.replace(/-/g, '') : "20000101";
 
             this.state.isScrolling = true;
@@ -172,15 +200,16 @@
         }
 
         runAutoScroll(targetDateStr) {
-            const endSignSelector = 'div[jsname="jOfkMb"]';
             const scrollTimer = setInterval(() => {
-                const endSign = document.querySelector(endSignSelector);
+                // 使用常量 SELECTORS.endSign
+                const endSign = document.querySelector(SELECTORS.endSign);
                 if (endSign && endSign.offsetParent !== null) {
                     this.finishScroll(scrollTimer, "已到达记录末端");
                     return;
                 }
 
-                const dateHeaders = document.querySelectorAll('h2.rp10kf');
+                // 使用常量 SELECTORS.dateHeader
+                const dateHeaders = document.querySelectorAll(SELECTORS.dateHeader);
                 if (dateHeaders.length > 0) {
                     let lastDateEl = null;
                     for (let i = dateHeaders.length - 1; i >= 0; i--) {
@@ -207,15 +236,16 @@
             setTimeout(() => this.extractAndVisualize(), 1500);
         }
 
-        // --- 数据提取 ---
         extractAndVisualize() {
-            const container = document.querySelector('div[jsname="i6CNtf"]')?.parentElement || document.body;
+            // 使用常量 SELECTORS
+            const container = document.querySelector(SELECTORS.listContainer)?.parentElement || document.body;
             const elements = container.children;
             let results = [];
             let currentDate = "";
 
             for (let el of elements) {
-                const dateHeader = el.querySelector('h2.rp10kf');
+                // 使用常量 SELECTORS.dateHeader
+                const dateHeader = el.querySelector(SELECTORS.dateHeader);
                 if (dateHeader) {
                     const rawDate = el.getAttribute('data-date'); 
                     if (rawDate) {
@@ -226,9 +256,10 @@
                     continue;
                 }
 
-                if (el.tagName.toLowerCase() === 'c-wiz') {
-                    const promptEl = el.querySelector('div[jsname="r4nke"]');
-                    const timeEl = el.querySelector('.H3Q9vf.XTnvW'); 
+                if (el.tagName.toLowerCase() === SELECTORS.itemTag.toLowerCase()) {
+                    // 使用常量 SELECTORS.promptText, SELECTORS.timestamp
+                    const promptEl = el.querySelector(SELECTORS.promptText);
+                    const timeEl = el.querySelector(SELECTORS.timestamp); 
                     if (promptEl && timeEl) {
                         let promptText = promptEl.innerText.replace(/^Prompted\s+/, '').trim();
                         let timeText = timeEl.innerText.split('•')[0].trim();
@@ -250,7 +281,7 @@
             this.updateStatus(`提取完成: ${filteredData.length} 条`, "#34a853");
             
             this.ui.jsonBtn.style.display = 'block';
-            this.ui.imgArea.style.display = 'block'; // 显示图片下载区
+            this.ui.imgArea.style.display = 'block';
             this.ui.startBtn.disabled = false;
             this.ui.startBtn.style.opacity = '1';
             this.ui.startBtn.textContent = '重新开始';
@@ -258,7 +289,6 @@
             this.generateReport(filteredData);
         }
 
-        // --- 生成报表与图表 ---
         generateReport(data) {
             if (!data || data.length === 0) {
                 alert("指定范围内无数据。");
@@ -277,7 +307,6 @@
                 boxFill: dark ? '#303134' : '#e8f0fe'
             };
 
-            // 数据统计逻辑
             const dailyCountsMap = {};
             const hourlyCounts = new Array(24).fill(0);
             data.forEach(item => {
@@ -292,6 +321,7 @@
                     if (hour >= 0 && hour < 24) hourlyCounts[hour]++;
                 }
             });
+            const totalRequests = data.length;
             const dates = Object.keys(dailyCountsMap).sort();
             const dayValues = dates.map(d => dailyCountsMap[d]);
             const sortedValues = [...dayValues].sort((a, b) => a - b);
@@ -303,11 +333,9 @@
             const q3 = sortedValues[Math.floor(n * 0.75)];
             const avg = (dayValues.reduce((a, b) => a + b, 0) / n).toFixed(1);
 
-            // 清理旧面板
             const oldPanel = document.getElementById('gemini-analysis-panel');
             if (oldPanel) oldPanel.remove();
 
-            // 创建面板
             const container = document.createElement('div');
             container.id = 'gemini-analysis-panel';
             Object.assign(container.style, {
@@ -319,7 +347,6 @@
                 fontFamily: 'Segoe UI, Roboto, sans-serif'
             });
 
-            // 面板头部
             const header = document.createElement('div');
             header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;';
             header.innerHTML = `<h2>Gemini 数据分析报告 (${data.length} 条)</h2>`;
@@ -330,7 +357,6 @@
             header.appendChild(closeBtn);
             container.appendChild(header);
 
-            // 辅助函数：创建图表容器
             const createChartContainer = (label, height) => {
                 const wrapper = document.createElement('div');
                 wrapper.style.marginBottom = '30px';
@@ -341,32 +367,21 @@
                 canvas.width = Math.min(window.innerWidth * 0.85, 1200);
                 canvas.height = height;
                 canvas.style.width = '100%';
-                
-                // 将标题附加到 canvas 对象上，方便合并时调用
                 canvas._chartTitle = label; 
-                
                 wrapper.appendChild(p);
                 wrapper.appendChild(canvas);
                 container.appendChild(wrapper);
                 return canvas;
             };
 
-            const boxCanvas = createChartContainer('发送量箱线图', 220);
+            const boxCanvas = createChartContainer('每日发送量箱线图', 220);
             const dayCanvas = createChartContainer('每日请求量趋势', 350);
             const lineCanvas = createChartContainer('24小时活跃分布', 300);
             
-            // 2. 将 Canvas 存入 state 以供下载使用
-            this.state.charts = {
-                box: boxCanvas,
-                day: dayCanvas,
-                line: lineCanvas
-            };
-            
+            this.state.charts = { box: boxCanvas, day: dayCanvas, line: lineCanvas };
             document.body.appendChild(container);
 
-            // --- 绘图 ---
-            
-            // Box Plot
+            // 1. Box Plot
             (function drawBox() {
                 const ctx = boxCanvas.getContext('2d');
                 const padding = 80, w = boxCanvas.width - padding * 2, h = boxCanvas.height;
@@ -405,7 +420,7 @@
                 ctx.fillText(`Avg: ${avg}`, avgX, midY + 65);
             })();
 
-            // Bar Chart
+            // 2. Bar Chart
             (function drawBar() {
                 const ctx = dayCanvas.getContext('2d');
                 const maxVal = Math.max(...dayValues, 5);
@@ -432,7 +447,7 @@
                 });
             })();
 
-            // Line Chart
+            // 3. Line Chart
             (function drawLine() {
                 const ctx = lineCanvas.getContext('2d');
                 const maxV = Math.max(...hourlyCounts, 5);
@@ -455,8 +470,12 @@
                     const y = lineCanvas.height - p - (v / maxV * h);
                     if (v > 0) {
                         ctx.fillStyle = colors.accent; ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+                        
+                        const pct = totalRequests > 0 ? ((v / totalRequests) * 100).toFixed(1) + '%' : '';
+                        const label = `${v} (${pct})`;
+
                         ctx.fillStyle = colors.text; ctx.textAlign = 'center'; ctx.font = 'bold 11px Arial'; 
-                        ctx.fillText(v, x, y - 15);
+                        ctx.fillText(label, x, y - 15);
                     }
                     if (i % 2 === 0 || i === 23) {
                         ctx.fillStyle = colors.subText; ctx.font = '11px Arial'; 
@@ -466,7 +485,6 @@
             })();
         }
 
-        // --- 2. 合并并下载图片 ---
         downloadMergedImage() {
             const checkboxes = this.ui.imgArea.querySelectorAll('input[type="checkbox"]:checked');
             if (checkboxes.length === 0) {
@@ -482,48 +500,63 @@
                 return;
             }
 
-            // 计算总画布大小
             const padding = 40;
-            const titleHeight = 40;
+            const titleHeight = 50; 
+            const mainHeaderHeight = 80; 
+            const footerHeight = 40; 
+            
             const width = Math.max(...canvasList.map(c => c.width));
-            let totalHeight = padding; // 初始顶部 padding
-
+            
+            let totalHeight = mainHeaderHeight + footerHeight; 
             canvasList.forEach(c => {
                 totalHeight += titleHeight + c.height + padding;
             });
 
-            // 创建超级画布
             const mergeCanvas = document.createElement('canvas');
             mergeCanvas.width = width;
             mergeCanvas.height = totalHeight;
             const ctx = mergeCanvas.getContext('2d');
 
-            // 填充背景
             const dark = this.state.isDarkMode;
-            ctx.fillStyle = dark ? '#202124' : '#ffffff';
+            const bgColor = dark ? '#202124' : '#ffffff';
+            const textColor = dark ? '#e8eaed' : '#202124';
+            const subTextColor = dark ? '#9aa0a6' : '#5f6368';
+
+            // 1. 背景
+            ctx.fillStyle = bgColor;
             ctx.fillRect(0, 0, width, totalHeight);
 
-            // 绘制内容
-            let currentY = padding;
-            const textColor = dark ? '#e8eaed' : '#202124';
+            // 2. 大标题
+            ctx.font = 'bold 36px "Google Sans", sans-serif';
+            ctx.fillStyle = textColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText("Gemini 数据分析报告", width / 2, mainHeaderHeight / 2);
 
+            // 3. 图表内容
+            let currentY = mainHeaderHeight;
             canvasList.forEach(c => {
-                // 1. 绘制标题
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
                 ctx.font = 'bold 24px Arial';
                 ctx.fillStyle = textColor;
-                ctx.textAlign = 'left';
-                ctx.fillText(c._chartTitle, 40, currentY + 25);
+                ctx.fillText(c._chartTitle, 40, currentY + 10);
                 
-                // 2. 绘制原图表
-                // 保持原图比例居中或拉伸，这里直接使用原图宽度绘制，因为我们在 generate 时统一了宽度
                 ctx.drawImage(c, 0, currentY + titleHeight);
 
                 currentY += titleHeight + c.height + padding;
             });
 
-            // 下载
+            // 4. 底部署名 (包含版本号)
+            const footerY = totalHeight - footerHeight + 10;
+            ctx.textAlign = 'center';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = subTextColor;
+            // 动态版本号
+            ctx.fillText(`Created by 788009/gemini-usage-analyzer v${APP_VERSION}`, width / 2, footerY);
+
             const link = document.createElement('a');
-            link.download = `gemini_stats_merged_${new Date().toISOString().slice(0,10)}.png`;
+            link.download = `gemini_report_${new Date().toISOString().slice(0,10)}.png`;
             link.href = mergeCanvas.toDataURL('image/png');
             link.click();
         }
