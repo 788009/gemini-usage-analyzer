@@ -1,20 +1,21 @@
-// content.js - v1.6
+// content.js - v1.8 (Fix Date Parsing)
 (function () {
     // --- 配置常量区 ---
     const SELECTORS = {
         endSign: 'div[jsname="jOfkMb"]',
         listContainer: 'div[jsname="i6CNtf"]',
-        dateHeader: 'h2.rp10kf',
-        promptText: 'div[jsname="r4nke"]',
+        dateHeader: 'h2.rp10kf', // 虽保留但作为后备
         timestamp: '.H3Q9vf.XTnvW',
-        itemTag: 'c-wiz'
+        itemTag: 'c-wiz',
+        // 关键：定位包含完整 Prompt 的删除按钮
+        deleteBtn: 'button[aria-label^="Delete activity item"]' 
     };
 
     const getVersion = () => {
         try {
             return chrome.runtime.getManifest().version;
         } catch (e) {
-            return "1.6.0";
+            return "1.8.0";
         }
     };
 
@@ -87,7 +88,19 @@
                     <input type="file" id="inp-import" style="display:none;" accept=".json">
                 </div>
                 
-                <button id="btn-json" style="width:100%; padding:8px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; display:none; margin-bottom:10px;">下载 JSON</button>
+                <div id="download-area" style="display:none; margin-bottom:10px;">
+                    <div style="display:flex; gap:5px;">
+                        <select id="sel-download-type" style="flex:2; padding:8px; border-radius:4px; border:1px solid #ccc; font-size:12px;">
+                            <option value="json_full">JSON: 时间 + 提问 (完整)</option>
+                            <option value="json_time">JSON: 仅时间</option>
+                            <option value="json_prompt">JSON: 仅提问</option>
+                            <option value="txt_line_full">TXT: 时间 | 提问 (单行)</option>
+                            <option value="txt_line_prompt">TXT: 仅提问 (单行)</option>
+                            <option value="txt_block">TXT: 提问 (---时间---)</option>
+                        </select>
+                        <button id="btn-download-data" style="flex:1; padding:8px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; background:#34a853; color:white;">导出</button>
+                    </div>
+                </div>
 
                 <div id="img-download-area" style="display:none; border-top:1px solid #ddd; padding-top:10px; margin-top:10px;">
                     <div style="font-size:12px; font-weight:bold; margin-bottom:5px;">导出图片选项:</div>
@@ -112,7 +125,9 @@
                 startBtn: panel.querySelector('#btn-start'),
                 importBtn: panel.querySelector('#btn-import'),
                 importInput: panel.querySelector('#inp-import'),
-                jsonBtn: panel.querySelector('#btn-json'),
+                downloadArea: panel.querySelector('#download-area'),
+                downloadType: panel.querySelector('#sel-download-type'),
+                downloadBtn: panel.querySelector('#btn-download-data'),
                 imgArea: panel.querySelector('#img-download-area'),
                 imgBtn: panel.querySelector('#btn-img-merge'),
                 status: panel.querySelector('#status-msg')
@@ -122,7 +137,7 @@
             this.ui.inputs[1].value = today.toISOString().split('T')[0];
 
             this.ui.startBtn.onclick = () => this.startProcess();
-            this.ui.jsonBtn.onclick = () => this.downloadJson();
+            this.ui.downloadBtn.onclick = () => this.handleDataDownload();
             this.ui.themeBtn.onclick = () => this.toggleTheme();
             this.ui.imgBtn.onclick = () => this.downloadMergedImage();
             
@@ -166,6 +181,9 @@
                 i.style.color = colors.inputText;
                 i.style.border = `1px solid ${colors.border}`;
             });
+            this.ui.downloadType.style.background = colors.inputBg;
+            this.ui.downloadType.style.color = colors.inputText;
+            this.ui.downloadType.style.border = `1px solid ${colors.border}`;
 
             this.ui.startBtn.style.background = colors.btnPrimary;
             this.ui.startBtn.style.color = colors.btnText;
@@ -174,9 +192,6 @@
             this.ui.importBtn.style.color = colors.btnSecondaryText;
             this.ui.importBtn.style.borderColor = colors.border;
 
-            this.ui.jsonBtn.style.background = '#34a853';
-            this.ui.jsonBtn.style.color = colors.btnText;
-            
             this.ui.imgArea.style.borderTopColor = colors.areaBorder;
             this.ui.themeBtn.textContent = dark ? '🌞' : '🌓';
             
@@ -203,7 +218,7 @@
                     this.state.data = importedData;
                     this.updateStatus(`导入成功: ${importedData.length} 条数据`, "#34a853");
                     
-                    this.ui.jsonBtn.style.display = 'block';
+                    this.ui.downloadArea.style.display = 'block';
                     this.ui.imgArea.style.display = 'block';
                     this.ui.importInput.value = '';
 
@@ -243,22 +258,17 @@
                     return;
                 }
 
-                const dateHeaders = document.querySelectorAll(SELECTORS.dateHeader);
-                if (dateHeaders.length > 0) {
-                    let lastDateEl = null;
-                    for (let i = dateHeaders.length - 1; i >= 0; i--) {
-                        const el = dateHeaders[i].closest('[data-date]');
-                        if (el) { lastDateEl = el; break; }
-                    }
-
-                    if (lastDateEl) {
-                        const currentDateId = lastDateEl.getAttribute('data-date');
-                        if (currentDateId && parseInt(currentDateId) <= parseInt(targetDateStr)) {
-                            this.finishScroll(scrollTimer, `已到达设定日期: ${currentDateId}`);
-                            return;
-                        }
+                // 检查滚动是否到达日期 (尝试从 c-wiz 的 data-date 检查)
+                const items = document.querySelectorAll(`${SELECTORS.itemTag}[data-date]`);
+                if (items.length > 0) {
+                    const lastItem = items[items.length - 1];
+                    const currentDateId = lastItem.getAttribute('data-date');
+                    if (currentDateId && parseInt(currentDateId) <= parseInt(targetDateStr)) {
+                         this.finishScroll(scrollTimer, `已到达设定日期: ${currentDateId}`);
+                         return;
                     }
                 }
+                
                 window.scrollTo(0, document.body.scrollHeight);
             }, 800);
         }
@@ -271,47 +281,89 @@
         }
 
         extractAndVisualize() {
+            // 尝试获取容器，如果找不到则降级为 body
             const container = document.querySelector(SELECTORS.listContainer)?.parentElement || document.body;
+            // 抓取所有 c-wiz 和 h2 元素
             const elements = container.children;
             let results = [];
-            let currentDate = "";
+            let headerDate = ""; // 用于存储旧逻辑中的日期
 
             for (let el of elements) {
+                // 1. 尝试从标题获取日期 (旧逻辑保留，以防万一)
                 const dateHeader = el.querySelector(SELECTORS.dateHeader);
                 if (dateHeader) {
-                    const rawDate = el.getAttribute('data-date'); 
-                    if (rawDate) {
-                        currentDate = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
-                    } else {
-                        currentDate = dateHeader.innerText.trim();
-                    }
-                    continue;
+                    headerDate = dateHeader.innerText.trim();
+                    // 这里不做 continue，因为有时 header 和 item 在同一层级但不同结构
                 }
 
+                // 2. 处理条目
                 if (el.tagName.toLowerCase() === SELECTORS.itemTag.toLowerCase()) {
-                    const promptEl = el.querySelector(SELECTORS.promptText);
-                    const timeEl = el.querySelector(SELECTORS.timestamp); 
-                    if (promptEl && timeEl) {
-                        let promptText = promptEl.innerText.replace(/^Prompted\s+/, '').trim();
-                        let timeText = timeEl.innerText.split('•')[0].trim();
-                        results.push({ fullTime: `${currentDate} ${timeText}`, prompt: promptText });
+                    // 核心修改：优先使用 item 自身的 data-date
+                    let itemDateStr = "";
+                    const rawDateAttr = el.getAttribute('data-date');
+                    
+                    if (rawDateAttr) {
+                        // 格式: 20260123 -> 2026-01-23
+                        if (rawDateAttr.length === 8) {
+                            itemDateStr = `${rawDateAttr.substring(0, 4)}-${rawDateAttr.substring(4, 6)}-${rawDateAttr.substring(6, 8)}`;
+                        }
+                    } else {
+                        // 降级使用 headerDate (如果 data-date 不存在)
+                        // 注意：如果 headerDate 是 "Today" 或 "Yesterday"，这里无法直接转换，
+                        // 但通常 MyActivity 会带有 data-date。
+                        // 这里假设如果没 data-date，可能不是我们要找的记录
+                        itemDateStr = headerDate; 
+                    }
+
+                    const timeEl = el.querySelector(SELECTORS.timestamp);
+                    const deleteBtn = el.querySelector(SELECTORS.deleteBtn);
+                    
+                    if (timeEl && deleteBtn && itemDateStr) {
+                        // 提取时间
+                        let timeText = timeEl.innerText.replace(/\u202f/g, ' ').split('•')[0].trim();
+                        
+                        // 提取 Prompt (移除前缀 "Delete activity item ")
+                        let promptText = "";
+                        const ariaLabel = deleteBtn.getAttribute('aria-label');
+                        if (ariaLabel) {
+                            promptText = ariaLabel.replace(/^Delete activity item\s*/, '').trim();
+                        }
+
+                        if (promptText) {
+                            results.push({ fullTime: `${itemDateStr} ${timeText}`, prompt: promptText });
+                        }
                     }
                 }
             }
 
+            // 过滤日期范围
             const { start, end } = this.state.dateRange;
+            // 如果没选日期，默认很久以前
             const validStart = start || new Date('2000-01-01');
+            // 结束日期默认今天之后
             const validEnd = end ? new Date(end.getTime() + 86400000) : new Date('2099-12-31');
 
             const filteredData = results.filter(item => {
+                // 尝试解析日期，防止 "Today" 等文字导致 Invalid Date
                 const itemDate = new Date(item.fullTime.split(' ')[0]);
+                if (isNaN(itemDate.getTime())) return false;
                 return itemDate >= validStart && itemDate < validEnd;
             });
 
             this.state.data = filteredData;
-            this.updateStatus(`提取完成: ${filteredData.length} 条`, "#34a853");
             
-            this.ui.jsonBtn.style.display = 'block';
+            if (filteredData.length === 0) {
+                 this.updateStatus(`未找到数据 (抓取到 ${results.length} 条，但在范围内为 0)`, "red");
+                 // 即使没数据，也重置按钮状态
+                 this.ui.startBtn.disabled = false;
+                 this.ui.startBtn.style.opacity = '1';
+                 this.ui.startBtn.textContent = '重新开始';
+                 return;
+            }
+
+            this.updateStatus(`提取完成: ${filteredData.length} 条 (完整内容)`, "#34a853");
+            
+            this.ui.downloadArea.style.display = 'block';
             this.ui.imgArea.style.display = 'block';
             this.ui.startBtn.disabled = false;
             this.ui.startBtn.style.opacity = '1';
@@ -322,7 +374,7 @@
 
         generateReport(data) {
             if (!data || data.length === 0) {
-                alert("指定范围内无数据。");
+                alert("无数据可供分析。");
                 return;
             }
 
@@ -406,7 +458,7 @@
             };
 
             const boxCanvas = createChartContainer('每日发送量箱线图', 220);
-            const dayCanvas = createChartContainer('每日请求量统计', 350); // 名称修改
+            const dayCanvas = createChartContainer('每日请求量统计', 350); 
             const lineCanvas = createChartContainer('24小时活跃分布', 300);
             
             this.state.charts = { box: boxCanvas, day: dayCanvas, line: lineCanvas };
@@ -451,7 +503,7 @@
                 ctx.fillText(`Avg: ${avg}`, avgX, midY + 65);
             })();
 
-            // 2. Bar Chart (Updated: 强制显示数量)
+            // 2. Bar Chart
             (function drawBar() {
                 const ctx = dayCanvas.getContext('2d');
                 const maxVal = Math.max(...dayValues, 5);
@@ -466,7 +518,6 @@
                     
                     ctx.fillStyle = colors.bar; ctx.fillRect(x, y, barW, bh);
                     
-                    // 无论柱子宽窄，强制显示数字
                     ctx.fillStyle = colors.text; ctx.textAlign = 'center'; ctx.font = 'bold 10px Arial'; 
                     ctx.fillText(v, x + barW/2, y - 5);
                     
@@ -592,14 +643,48 @@
             link.click();
         }
 
-        downloadJson() {
+        handleDataDownload() {
             if (this.state.data.length === 0) { alert("无数据"); return; }
-            const dataStr = JSON.stringify(this.state.data, null, 2);
-            const blob = new Blob([dataStr], { type: "application/json" });
+            
+            const type = this.ui.downloadType.value;
+            let content = "";
+            let mimeType = "text/plain";
+            let extension = "txt";
+
+            const escapeNewLine = (str) => str.replace(/\n/g, '\\n');
+
+            switch (type) {
+                case 'json_full':
+                    content = JSON.stringify(this.state.data, null, 2);
+                    mimeType = "application/json";
+                    extension = "json";
+                    break;
+                case 'json_time':
+                    content = JSON.stringify(this.state.data.map(d => ({fullTime: d.fullTime})), null, 2);
+                    mimeType = "application/json";
+                    extension = "json";
+                    break;
+                case 'json_prompt':
+                    content = JSON.stringify(this.state.data.map(d => ({prompt: d.prompt})), null, 2);
+                    mimeType = "application/json";
+                    extension = "json";
+                    break;
+                case 'txt_line_full':
+                    content = this.state.data.map(d => `${d.fullTime} | ${escapeNewLine(d.prompt)}`).join('\n');
+                    break;
+                case 'txt_line_prompt':
+                    content = this.state.data.map(d => escapeNewLine(d.prompt)).join('\n');
+                    break;
+                case 'txt_block':
+                    content = this.state.data.map(d => `--- ${d.fullTime} ---\n${d.prompt}`).join('\n\n');
+                    break;
+            }
+
+            const blob = new Blob([content], { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `gemini_data_${this.state.dateRange.start?.toISOString().slice(0,10) || 'all'}.json`;
+            a.download = `gemini_${type}_${this.state.dateRange.start?.toISOString().slice(0,10) || 'all'}.${extension}`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
