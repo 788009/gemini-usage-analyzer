@@ -1,4 +1,4 @@
-// content.js - v1.5
+// content.js - v1.6
 (function () {
     // --- 配置常量区 ---
     const SELECTORS = {
@@ -14,7 +14,7 @@
         try {
             return chrome.runtime.getManifest().version;
         } catch (e) {
-            return "1.5.0";
+            return "1.6.0";
         }
     };
 
@@ -92,7 +92,7 @@
                 <div id="img-download-area" style="display:none; border-top:1px solid #ddd; padding-top:10px; margin-top:10px;">
                     <div style="font-size:12px; font-weight:bold; margin-bottom:5px;">导出图片选项:</div>
                     <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="box" checked> 每日发送量箱线图</label>
-                    <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="day" checked> 每日趋势图</label>
+                    <label style="display:block; margin-bottom:3px; font-size:12px;"><input type="checkbox" value="day" checked> 每日请求量统计</label>
                     <label style="display:block; margin-bottom:8px; font-size:12px;"><input type="checkbox" value="line" checked> 24小时分布图</label>
                     <button id="btn-img-merge" style="width:100%; padding:8px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; background:#fbbc04; color:#202124;">下载合并图片</button>
                 </div>
@@ -121,13 +121,11 @@
             const today = new Date();
             this.ui.inputs[1].value = today.toISOString().split('T')[0];
 
-            // 事件绑定
             this.ui.startBtn.onclick = () => this.startProcess();
             this.ui.jsonBtn.onclick = () => this.downloadJson();
             this.ui.themeBtn.onclick = () => this.toggleTheme();
             this.ui.imgBtn.onclick = () => this.downloadMergedImage();
             
-            // 导入相关事件
             this.ui.importBtn.onclick = () => this.ui.importInput.click();
             this.ui.importInput.onchange = (e) => this.handleFileImport(e);
         }
@@ -169,16 +167,13 @@
                 i.style.border = `1px solid ${colors.border}`;
             });
 
-            // Start Button
             this.ui.startBtn.style.background = colors.btnPrimary;
             this.ui.startBtn.style.color = colors.btnText;
             
-            // Import Button
             this.ui.importBtn.style.background = colors.btnSecondaryBg;
             this.ui.importBtn.style.color = colors.btnSecondaryText;
             this.ui.importBtn.style.borderColor = colors.border;
 
-            // JSON Download Button
             this.ui.jsonBtn.style.background = '#34a853';
             this.ui.jsonBtn.style.color = colors.btnText;
             
@@ -194,7 +189,6 @@
             this.ui.status.style.color = color || (this.state.isDarkMode ? '#9aa0a6' : '#666');
         }
 
-        // --- 导入功能 ---
         handleFileImport(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -203,27 +197,17 @@
             reader.onload = (e) => {
                 try {
                     const importedData = JSON.parse(e.target.result);
-                    
-                    // 简单校验格式
-                    if (!Array.isArray(importedData)) {
-                        throw new Error("JSON 格式错误: 根元素应为数组");
-                    }
-                    if (importedData.length > 0 && !importedData[0].fullTime) {
-                         throw new Error("JSON 格式错误: 缺少 fullTime 字段");
-                    }
+                    if (!Array.isArray(importedData)) throw new Error("JSON 格式错误: 根元素应为数组");
+                    if (importedData.length > 0 && !importedData[0].fullTime) throw new Error("JSON 格式错误: 缺少 fullTime 字段");
 
                     this.state.data = importedData;
                     this.updateStatus(`导入成功: ${importedData.length} 条数据`, "#34a853");
                     
-                    // 显示控制按钮
                     this.ui.jsonBtn.style.display = 'block';
                     this.ui.imgArea.style.display = 'block';
-                    
-                    // 重置 input 以便再次导入同名文件
                     this.ui.importInput.value = '';
 
                     this.generateReport(importedData);
-
                 } catch (err) {
                     alert("导入失败: " + err.message);
                     this.updateStatus("导入失败", "red");
@@ -232,7 +216,6 @@
             reader.readAsText(file);
         }
 
-        // --- 抓取功能 ---
         startProcess() {
             if (this.state.isScrolling) return;
 
@@ -423,7 +406,7 @@
             };
 
             const boxCanvas = createChartContainer('每日发送量箱线图', 220);
-            const dayCanvas = createChartContainer('每日请求量趋势', 350);
+            const dayCanvas = createChartContainer('每日请求量统计', 350); // 名称修改
             const lineCanvas = createChartContainer('24小时活跃分布', 300);
             
             this.state.charts = { box: boxCanvas, day: dayCanvas, line: lineCanvas };
@@ -468,7 +451,7 @@
                 ctx.fillText(`Avg: ${avg}`, avgX, midY + 65);
             })();
 
-            // 2. Bar Chart
+            // 2. Bar Chart (Updated: 强制显示数量)
             (function drawBar() {
                 const ctx = dayCanvas.getContext('2d');
                 const maxVal = Math.max(...dayValues, 5);
@@ -482,10 +465,11 @@
                     const y = dayCanvas.height - paddingB - bh;
                     
                     ctx.fillStyle = colors.bar; ctx.fillRect(x, y, barW, bh);
-                    if (barW > 15) {
-                        ctx.fillStyle = colors.text; ctx.textAlign = 'center'; ctx.font = 'bold 10px Arial'; 
-                        ctx.fillText(v, x + barW/2, y - 5);
-                    }
+                    
+                    // 无论柱子宽窄，强制显示数字
+                    ctx.fillStyle = colors.text; ctx.textAlign = 'center'; ctx.font = 'bold 10px Arial'; 
+                    ctx.fillText(v, x + barW/2, y - 5);
+                    
                     ctx.save();
                     ctx.translate(x + barW/2, dayCanvas.height - paddingB + 10); 
                     ctx.rotate(Math.PI / 2);
