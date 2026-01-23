@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Usage Analyzer",
+  "version": "1.0",
+  "description": "滚动抓取 Gemini 活动记录并生成可视化分析图表",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://myactivity.google.com/product/gemini*"],
+      "js": ["content.js"]
+    }
+  ]
+}
