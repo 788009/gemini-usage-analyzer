@@ -1,27 +1,20 @@
-// content.js - v1.4
+// content.js - v1.5
 (function () {
-    // --- 配置常量区 (集中管理选择器) ---
+    // --- 配置常量区 ---
     const SELECTORS = {
-        // 滚动到底部时出现的标志元素
         endSign: 'div[jsname="jOfkMb"]',
-        // 包含所有历史记录条目的主容器
         listContainer: 'div[jsname="i6CNtf"]',
-        // 日期标题 (例如 "Today", "Yesterday")
         dateHeader: 'h2.rp10kf',
-        // 具体的提问文本容器
         promptText: 'div[jsname="r4nke"]',
-        // 时间戳元素 (例如 "10:30 AM")
         timestamp: '.H3Q9vf.XTnvW',
-        // 单条记录的容器标签 (通常是 c-wiz)
         itemTag: 'c-wiz'
     };
 
-    // 获取版本号 (优先从 manifest 读取)
     const getVersion = () => {
         try {
             return chrome.runtime.getManifest().version;
         } catch (e) {
-            return "0.0.0"; // Fallback if tested outside extension context
+            return "1.5.0";
         }
     };
 
@@ -89,9 +82,12 @@
                 </div>
 
                 <div style="display:flex; gap:10px; margin-bottom: 10px;">
-                    <button id="btn-start" style="flex:1; padding:10px; border-radius:4px; border:none; cursor:pointer; font-weight:bold;">开始抓取</button>
-                    <button id="btn-json" style="flex:1; padding:10px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; display:none;">下载 JSON</button>
+                    <button id="btn-start" style="flex:2; padding:10px; border-radius:4px; border:none; cursor:pointer; font-weight:bold;">开始抓取</button>
+                    <button id="btn-import" style="flex:1; padding:10px; border-radius:4px; border:1px solid; cursor:pointer; font-weight:bold;">导入JSON</button>
+                    <input type="file" id="inp-import" style="display:none;" accept=".json">
                 </div>
+                
+                <button id="btn-json" style="width:100%; padding:8px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; display:none; margin-bottom:10px;">下载 JSON</button>
 
                 <div id="img-download-area" style="display:none; border-top:1px solid #ddd; padding-top:10px; margin-top:10px;">
                     <div style="font-size:12px; font-weight:bold; margin-bottom:5px;">导出图片选项:</div>
@@ -110,10 +106,12 @@
                 panel: panel,
                 title: panel.querySelector('h3'),
                 labels: panel.querySelectorAll('label'),
-                inputs: panel.querySelectorAll('input'),
+                inputs: panel.querySelectorAll('input:not([type="file"])'),
                 themeBtn: panel.querySelector('#btn-theme'),
                 githubBtn: panel.querySelector('#btn-github'),
                 startBtn: panel.querySelector('#btn-start'),
+                importBtn: panel.querySelector('#btn-import'),
+                importInput: panel.querySelector('#inp-import'),
                 jsonBtn: panel.querySelector('#btn-json'),
                 imgArea: panel.querySelector('#img-download-area'),
                 imgBtn: panel.querySelector('#btn-img-merge'),
@@ -123,10 +121,15 @@
             const today = new Date();
             this.ui.inputs[1].value = today.toISOString().split('T')[0];
 
+            // 事件绑定
             this.ui.startBtn.onclick = () => this.startProcess();
             this.ui.jsonBtn.onclick = () => this.downloadJson();
             this.ui.themeBtn.onclick = () => this.toggleTheme();
             this.ui.imgBtn.onclick = () => this.downloadMergedImage();
+            
+            // 导入相关事件
+            this.ui.importBtn.onclick = () => this.ui.importInput.click();
+            this.ui.importInput.onchange = (e) => this.handleFileImport(e);
         }
 
         toggleTheme() {
@@ -148,7 +151,9 @@
                 btnText: '#ffffff',
                 inputBg: dark ? '#303134' : '#ffffff',
                 inputText: dark ? '#e8eaed' : '#202124',
-                areaBorder: dark ? '#5f6368' : '#ddd'
+                areaBorder: dark ? '#5f6368' : '#ddd',
+                btnSecondaryBg: dark ? '#303134' : '#f1f3f4',
+                btnSecondaryText: dark ? '#e8eaed' : '#3c4043'
             };
 
             const p = this.ui.panel;
@@ -163,8 +168,17 @@
                 i.style.color = colors.inputText;
                 i.style.border = `1px solid ${colors.border}`;
             });
+
+            // Start Button
             this.ui.startBtn.style.background = colors.btnPrimary;
             this.ui.startBtn.style.color = colors.btnText;
+            
+            // Import Button
+            this.ui.importBtn.style.background = colors.btnSecondaryBg;
+            this.ui.importBtn.style.color = colors.btnSecondaryText;
+            this.ui.importBtn.style.borderColor = colors.border;
+
+            // JSON Download Button
             this.ui.jsonBtn.style.background = '#34a853';
             this.ui.jsonBtn.style.color = colors.btnText;
             
@@ -180,6 +194,45 @@
             this.ui.status.style.color = color || (this.state.isDarkMode ? '#9aa0a6' : '#666');
         }
 
+        // --- 导入功能 ---
+        handleFileImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    
+                    // 简单校验格式
+                    if (!Array.isArray(importedData)) {
+                        throw new Error("JSON 格式错误: 根元素应为数组");
+                    }
+                    if (importedData.length > 0 && !importedData[0].fullTime) {
+                         throw new Error("JSON 格式错误: 缺少 fullTime 字段");
+                    }
+
+                    this.state.data = importedData;
+                    this.updateStatus(`导入成功: ${importedData.length} 条数据`, "#34a853");
+                    
+                    // 显示控制按钮
+                    this.ui.jsonBtn.style.display = 'block';
+                    this.ui.imgArea.style.display = 'block';
+                    
+                    // 重置 input 以便再次导入同名文件
+                    this.ui.importInput.value = '';
+
+                    this.generateReport(importedData);
+
+                } catch (err) {
+                    alert("导入失败: " + err.message);
+                    this.updateStatus("导入失败", "red");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- 抓取功能 ---
         startProcess() {
             if (this.state.isScrolling) return;
 
@@ -201,14 +254,12 @@
 
         runAutoScroll(targetDateStr) {
             const scrollTimer = setInterval(() => {
-                // 使用常量 SELECTORS.endSign
                 const endSign = document.querySelector(SELECTORS.endSign);
                 if (endSign && endSign.offsetParent !== null) {
                     this.finishScroll(scrollTimer, "已到达记录末端");
                     return;
                 }
 
-                // 使用常量 SELECTORS.dateHeader
                 const dateHeaders = document.querySelectorAll(SELECTORS.dateHeader);
                 if (dateHeaders.length > 0) {
                     let lastDateEl = null;
@@ -237,14 +288,12 @@
         }
 
         extractAndVisualize() {
-            // 使用常量 SELECTORS
             const container = document.querySelector(SELECTORS.listContainer)?.parentElement || document.body;
             const elements = container.children;
             let results = [];
             let currentDate = "";
 
             for (let el of elements) {
-                // 使用常量 SELECTORS.dateHeader
                 const dateHeader = el.querySelector(SELECTORS.dateHeader);
                 if (dateHeader) {
                     const rawDate = el.getAttribute('data-date'); 
@@ -257,7 +306,6 @@
                 }
 
                 if (el.tagName.toLowerCase() === SELECTORS.itemTag.toLowerCase()) {
-                    // 使用常量 SELECTORS.promptText, SELECTORS.timestamp
                     const promptEl = el.querySelector(SELECTORS.promptText);
                     const timeEl = el.querySelector(SELECTORS.timestamp); 
                     if (promptEl && timeEl) {
@@ -547,12 +595,11 @@
                 currentY += titleHeight + c.height + padding;
             });
 
-            // 4. 底部署名 (包含版本号)
+            // 4. 底部署名
             const footerY = totalHeight - footerHeight + 10;
             ctx.textAlign = 'center';
             ctx.font = '14px Arial';
             ctx.fillStyle = subTextColor;
-            // 动态版本号
             ctx.fillText(`Created by 788009/gemini-usage-analyzer v${APP_VERSION}`, width / 2, footerY);
 
             const link = document.createElement('a');
