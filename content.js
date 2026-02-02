@@ -317,43 +317,45 @@
         }
 
         extractAndVisualize() {
-            const container = document.querySelector(SELECTORS.listContainer)?.parentElement || document.body;
             let finalData = [];
             let methodUsed = "";
-
+            const container = document.querySelector(SELECTORS.listContainer)?.parentElement || document.body;
             const hasDeleteButtons = !!container.querySelector(SELECTORS.deleteBtn);
-
-            // 1. 扫描页面 Script 标签 (暴力匹配)
-            // 这里将初始加载的数据也放入池子，和 XHR 数据合并
-            const scriptTags = document.querySelectorAll('script');
-            scriptTags.forEach(script => {
-                const items = parseGeminiData(script.innerHTML);
-                if (items.length > 0) this.addDataToPool(items);
-            });
-            
-            // 2. 从 dataPool 生成最终数据
-            if (this.state.dataPool.length > 0) {
-                // 排序：时间倒序
-                this.state.dataPool.sort((a, b) => b.ts - a.ts);
-                
-                // 转换为显示格式
-                for (let item of this.state.dataPool) {
-                    const dateObj = new Date(item.ts);
-                    const datePart = dateObj.toLocaleDateString('en-CA');
-                    const timePart = dateObj.toLocaleTimeString('en-US', { hour12: false });
-                    finalData.push({ fullTime: `${datePart} ${timePart}`, prompt: item.prompt });
-                }
-                methodUsed = "策略B: 网络拦截/脚本分析 (完整)";
-            }
-            
-            // 3. Fallback: 如果池子依然为空（极少见），尝试 DOM
-            if (finalData.length === 0 && hasDeleteButtons) {
+            if (hasDeleteButtons) {
                 methodUsed = "策略A: DOM解析 (完整)";
                 finalData = this.strategyDomWithDeleteBtn(container);
-            } else if (finalData.length === 0) {
-                methodUsed = "策略C: 可见文本 (不完整)";
-                finalData = this.strategyVisibleDom(container);
-                alert("【警告】\n无法获取后台完整数据。\n将降级使用页面可见文本统计，内容将被截断。");
+            }
+            else {
+                // Fallback
+                // 1. 扫描页面 Script 标签 (暴力匹配)
+                // 这里将初始加载的数据也放入池子，和 XHR 数据合并
+                const scriptTags = document.querySelectorAll('script');
+                scriptTags.forEach(script => {
+                    const items = parseGeminiData(script.innerHTML);
+                    if (items.length > 0) this.addDataToPool(items);
+                });
+                
+                // 2. 从 dataPool 生成最终数据
+                if (this.state.dataPool.length > 0) {
+                    // 排序：时间倒序
+                    this.state.dataPool.sort((a, b) => b.ts - a.ts);
+                    
+                    // 转换为显示格式
+                    for (let item of this.state.dataPool) {
+                        const dateObj = new Date(item.ts);
+                        const datePart = dateObj.toLocaleDateString('en-CA');
+                        const timePart = dateObj.toLocaleTimeString('en-US', { hour12: false });
+                        finalData.push({ fullTime: `${datePart} ${timePart}`, prompt: item.prompt });
+                    }
+                    methodUsed = "策略B: 网络拦截/脚本分析 (完整)";
+                }
+
+                // 3. Fallback: 如果池子依然为空（极少见），尝试 DOM
+                if (finalData.length === 0) {
+                    methodUsed = "策略C: 可见文本 (不完整)";
+                    finalData = this.strategyVisibleDom(container);
+                    alert("【警告】\n无法获取后台完整数据。\n将降级使用页面可见文本统计，内容将被截断。");
+                }
             }
 
             // 日期过滤
